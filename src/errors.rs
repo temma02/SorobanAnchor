@@ -50,6 +50,7 @@ pub enum ErrorCode {
     NotInitialized = 22,
     IllegalTransition = 23,
     SessionExpired = 25,
+    SessionClosed = 26,
     CacheExpired = 48,
     CacheNotFound = 49,
 }
@@ -84,6 +85,7 @@ impl ErrorCode {
             ErrorCode::CacheNotFound => "Cache entry not found",
             ErrorCode::IllegalTransition => "Illegal transaction state transition",
             ErrorCode::SessionExpired => "Session has expired",
+            ErrorCode::SessionClosed => "Session is closed",
         }
     }
 }
@@ -233,6 +235,10 @@ impl AnchorKitError {
     pub fn session_expired() -> Self {
         Self::from_code(ErrorCode::SessionExpired)
     }
+
+    pub fn session_closed() -> Self {
+        Self::from_code(ErrorCode::SessionClosed)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +342,7 @@ mod tests {
             ErrorCode::CacheNotFound,
             ErrorCode::IllegalTransition,
             ErrorCode::SessionExpired,
+            ErrorCode::SessionClosed,
         ];
         for code in codes {
             assert!(!code.default_message().is_empty());
