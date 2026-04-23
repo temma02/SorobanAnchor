@@ -10,6 +10,7 @@ mod response_validator;
 mod retry;
 mod transaction_state_tracker;
 pub mod sep6;
+pub mod sep38;
 pub mod contract;
 
 pub use domain_validator::validate_anchor_domain;
@@ -32,6 +33,9 @@ pub use sep6::{
     fetch_transaction_status, initiate_deposit, initiate_withdrawal, DepositResponse,
     RawDepositResponse, RawTransactionResponse, RawWithdrawalResponse, TransactionKind,
     TransactionStatus, TransactionStatusResponse, WithdrawalResponse,
+};
+pub use sep38::{
+    fetch_prices, Price, RawPrice,
 };
 pub use contract::{AnchorKitContract, EndpointUpdated, get_endpoint, set_endpoint};
 
