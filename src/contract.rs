@@ -1480,6 +1480,23 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
         }
     }
 
+    pub fn deactivate_anchor(env: Env, anchor: Address) {
+        Self::require_admin(&env);
+        let meta_key = (symbol_short!("ANCHMETA"), anchor.clone());
+        let mut meta: RoutingAnchorMeta = env
+            .storage()
+            .persistent()
+            .get(&meta_key)
+            .unwrap_or_else(|| panic_with_error!(&env, ErrorCode::NotInitialized));
+        meta.is_active = false;
+        env.storage().persistent().set(&meta_key, &meta);
+        env.storage().persistent().extend_ttl(&meta_key, PERSISTENT_TTL, PERSISTENT_TTL);
+        env.events().publish(
+            (symbol_short!("anchor"), symbol_short!("deactivated"), anchor),
+            (),
+        );
+    }
+
     pub fn route_transaction(env: Env, options: RoutingOptions) -> Quote {
         let now = env.ledger().timestamp();
         let list_key = soroban_sdk::vec![&env, symbol_short!("ANCHLIST")];
