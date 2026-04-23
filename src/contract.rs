@@ -287,6 +287,24 @@ pub struct EndpointUpdated {
     pub endpoint: String,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct WebhookEvent {
+    pub event_type: String,
+    pub transaction_id: u64,
+    pub timestamp: u64,
+    pub payload_hash: Bytes,
+}
+
+#[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum KycStatus {
+    Pending = 0,
+    Approved = 1,
+    Rejected = 2,
+}
+
 // ---------------------------------------------------------------------------
 // TTLs (in ledgers)
 // ---------------------------------------------------------------------------
@@ -572,7 +590,17 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
                 id,
                 subject,
             ),
-            AttestEvent { payload_hash, timestamp },
+            AttestEvent { payload_hash: payload_hash.clone(), timestamp },
+        );
+
+        env.events().publish(
+            (symbol_short!("webhook"), symbol_short!("event")),
+            WebhookEvent {
+                event_type: String::from_str(&env, "attestation_submitted"),
+                transaction_id: id,
+                timestamp,
+                payload_hash,
+            },
         );
 
         id
@@ -633,7 +661,17 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
                 id,
                 subject,
             ),
-            AttestEvent { payload_hash, timestamp },
+            AttestEvent { payload_hash: payload_hash.clone(), timestamp },
+        );
+
+        env.events().publish(
+            (symbol_short!("webhook"), symbol_short!("event")),
+            WebhookEvent {
+                event_type: String::from_str(&env, "attestation_submitted"),
+                transaction_id: id,
+                timestamp,
+                payload_hash,
+            },
         );
 
         id
@@ -1271,6 +1309,16 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
                 }
             }
         }
+
+        env.events().publish(
+            (symbol_short!("webhook"), symbol_short!("event")),
+            WebhookEvent {
+                event_type: String::from_str(&env, "transaction_routed"),
+                transaction_id: best.quote_id,
+                timestamp: now,
+                payload_hash: Bytes::new(&env),
+            },
+        );
 
         best
     }
