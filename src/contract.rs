@@ -525,6 +525,37 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
             .unwrap_or_else(|| panic_with_error!(&env, ErrorCode::AttestorNotRegistered))
     }
 
+    // -----------------------------------------------------------------------
+    // Webhook endpoint management
+    // -----------------------------------------------------------------------
+
+    /// Register a webhook URL for an attestor (attestor-auth).
+    /// Validates the webhook URL via validate_anchor_domain.
+    pub fn register_webhook(env: Env, attestor: Address, webhook_url: String) {
+        attestor.require_auth();
+        Self::check_attestor(&env, &attestor);
+        crate::validate_anchor_domain(webhook_url.as_str()).map_err(|_| panic_with_error!(&env, ErrorCode::InvalidEndpointFormat))?;
+        let key = (symbol_short!("WEBHOOK"), attestor.clone());
+        env.storage().persistent().set(&key, &webhook_url);
+        env.storage().persistent().extend_ttl(&key, PERSISTENT_TTL, PERSISTENT_TTL);
+        env.events().publish(
+            (symbol_short!("webhook"), symbol_short!("registered")),
+            EndpointUpdated {
+                attestor,
+                endpoint: webhook_url,
+            },
+        );
+    }
+
+    /// Retrieve the webhook URL for an attestor.
+    pub fn get_webhook_url(env: Env, attestor: Address) -> String {
+        if !Self::is_attestor(env.clone(), attestor.clone()) {
+            panic_with_error!(&env, ErrorCode::AttestorNotRegistered);
+        }
+        env.storage().persistent()
+            .get::<_, String>(&(symbol_short!("WEBHOOK"), attestor))
+            .unwrap_or_else(|| panic_with_error!(&env, ErrorCode::AttestorNotRegistered))
+    }
 
     // -----------------------------------------------------------------------
     // Service configuration
@@ -696,7 +727,17 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
                 id,
                 subject,
             ),
-            AttestEvent { payload_hash, timestamp },
+            AttestEvent { payload_hash: payload_hash.clone(), timestamp },
+        );
+
+        env.events().publish(
+            (symbol_short!("webhook"), symbol_short!("event")),
+            WebhookEvent {
+                event_type: String::from_str(&env, "attestation_submitted"),
+                transaction_id: id,
+                timestamp,
+                payload_hash,
+            },
         );
 
         id
@@ -758,7 +799,17 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
                 id,
                 subject,
             ),
-            AttestEvent { payload_hash, timestamp },
+            AttestEvent { payload_hash: payload_hash.clone(), timestamp },
+        );
+
+        env.events().publish(
+            (symbol_short!("webhook"), symbol_short!("event")),
+            WebhookEvent {
+                event_type: String::from_str(&env, "attestation_submitted"),
+                transaction_id: id,
+                timestamp,
+                payload_hash,
+            },
         );
 
         id
@@ -857,6 +908,64 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
     // -----------------------------------------------------------------------
     // Session management
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // KYC data management
+    // -----------------------------------------------------------------------
+
+    /// Submit KYC data for a subject. Stores SHA-256 hash of KYC payload.
+    /// Never stores raw PII, only the hash.
+    pub fn submit_kyc_data(
+        env: Env,
+        subject: Address,
+        kyc_hash: Bytes,
+        attestor: Address,
+    ) {
+        attestor.require_auth();
+        Self::check_attestor(&env, &attestor);
+
+        let key = (symbol_short!("KYC"), subject.clone());
+        let now = env.ledger().timestamp();
+
+        // Store KYC status as Pending initially
+        env.storage().persistent().set(&key, &(kyc_hash.clone(), now));
+        env.storage().persistent().extend_ttl(&key, PERSISTENT_TTL, PERSISTENT_TTL);
+
+        env.events().publish(
+            (symbol_short!("kyc"), symbol_short!("submitted"), subject),
+            WebhookEvent {
+                event_type: String::from_str(&env, "kyc_submitted"),
+                transaction_id: 0,
+                timestamp: now,
+                payload_hash: kyc_hash,
+            },
+        );
+    }
+
+    /// Get the KYC status for a subject.
+    /// Returns KycStatus (Pending, Approved, Rejected).
+    /// Panics with AttestationNotFound if no KYC record exists.
+    pub fn get_kyc_status(env: Env, subject: Address) -> KycStatus {
+        let key = (symbol_short!("KYC"), subject.clone());
+        let status_key = (symbol_short!("KYCSTATUS"), subject);
+
+        // Check if KYC record exists
+        if !env.storage().persistent().has(&key) {
+            panic_with_error!(&env, ErrorCode::AttestationNotFound);
+        }
+
+        // Get the status, default to Pending if not set
+        let status: u32 = env.storage().persistent()
+            .get(&status_key)
+            .unwrap_or(0u32);
+
+        match status {
+            0 => KycStatus::Pending,
+            1 => KycStatus::Approved,
+            2 => KycStatus::Rejected,
+            _ => KycStatus::Pending,
+        }
+    }
 
     pub fn create_session(env: Env, initiator: Address) -> u64 {
         initiator.require_auth();
@@ -1397,6 +1506,16 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
                 }
             }
         }
+
+        env.events().publish(
+            (symbol_short!("webhook"), symbol_short!("event")),
+            WebhookEvent {
+                event_type: String::from_str(&env, "transaction_routed"),
+                transaction_id: best.quote_id,
+                timestamp: now,
+                payload_hash: Bytes::new(&env),
+            },
+        );
 
         best
     }
