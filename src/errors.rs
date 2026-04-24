@@ -47,8 +47,9 @@ pub enum ErrorCode {
     KycNotFound = 19,
     KycPending = 22,
     KycRejected = 23,
+    WebhookDeliveryFailed = 24,
     NotInitialized = 25,
-    IllegalTransition = 24,
+    IllegalTransition = 26,
     CacheExpired = 48,
     CacheNotFound = 49,
 }
@@ -73,12 +74,12 @@ impl ErrorCode {
             ErrorCode::ServicesNotConfigured => "Services are not configured",
             ErrorCode::ValidationError => "Response schema validation failed",
             ErrorCode::RateLimitExceeded => "Rate limit exceeded",
-            ErrorCode::NotInitialized => "Contract is not initialized",
             ErrorCode::AttestationNotFound => "Attestation not found",
             ErrorCode::InvalidSep10Token => "SEP-10 JWT is missing, expired, or invalid",
             ErrorCode::KycNotFound => "KYC record not found",
-            ErrorCode::KycRejected => "KYC verification was rejected",
             ErrorCode::KycPending => "KYC verification is pending",
+            ErrorCode::KycRejected => "KYC verification was rejected",
+            ErrorCode::WebhookDeliveryFailed => "Webhook delivery failed validation",
             ErrorCode::NotInitialized => "Contract is not initialized",
             ErrorCode::IllegalTransition => "Illegal transaction state transition",
             ErrorCode::CacheExpired => "Cache entry has expired",
@@ -213,6 +214,10 @@ impl AnchorKitError {
         Self::from_code(ErrorCode::KycRejected)
     }
 
+    pub fn webhook_delivery_failed() -> Self {
+        Self::from_code(ErrorCode::WebhookDeliveryFailed)
+    }
+
     pub fn validation_error(context: &str) -> Self {
         Self::with_context(ErrorCode::ValidationError, ErrorCode::ValidationError.default_message(), context)
     }
@@ -293,6 +298,7 @@ mod tests {
         assert_eq!(AnchorKitError::kyc_not_found().code, ErrorCode::KycNotFound);
         assert_eq!(AnchorKitError::kyc_pending().code, ErrorCode::KycPending);
         assert_eq!(AnchorKitError::kyc_rejected().code, ErrorCode::KycRejected);
+        assert_eq!(AnchorKitError::webhook_delivery_failed().code, ErrorCode::WebhookDeliveryFailed);
     }
 
     #[test]
@@ -324,8 +330,9 @@ mod tests {
             ErrorCode::AttestationNotFound,
             ErrorCode::InvalidSep10Token,
             ErrorCode::KycNotFound,
-            ErrorCode::KycRejected,
             ErrorCode::KycPending,
+            ErrorCode::KycRejected,
+            ErrorCode::WebhookDeliveryFailed,
             ErrorCode::NotInitialized,
             ErrorCode::IllegalTransition,
             ErrorCode::CacheExpired,
