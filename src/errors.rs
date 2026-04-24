@@ -45,6 +45,14 @@ pub enum ErrorCode {
     AttestationNotFound = 17,
     InvalidSep10Token = 18,
     KycNotFound = 19,
+ feat/session-expiry-check
+    KycPending = 22,
+    KycRejected = 23,
+    WebhookDeliveryFailed = 24,
+    NotInitialized = 25,
+    IllegalTransition = 26,
+    SessionExpired = 27,
+
     KycRejected = 21,
  fix/kyc-pending-error-code-22
  fix/kyc-rejected-error-code-23
@@ -94,6 +102,7 @@ impl ErrorCode {
             ErrorCode::WebhookDeliveryFailed => "Webhook delivery failed validation",
             ErrorCode::NotInitialized => "Contract is not initialized",
             ErrorCode::IllegalTransition => "Illegal transaction state transition",
+            ErrorCode::SessionExpired => "Session has expired",
             ErrorCode::CacheExpired => "Cache entry has expired",
             ErrorCode::CacheNotFound => "Cache entry not found",
  fix/kyc-pending-error-code-22
@@ -255,10 +264,13 @@ impl AnchorKitError {
     pub fn session_expired() -> Self {
         Self::from_code(ErrorCode::SessionExpired)
     }
+ feat/session-expiry-check
+
 
     pub fn session_closed() -> Self {
         Self::from_code(ErrorCode::SessionClosed)
     }
+ main
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +379,7 @@ mod tests {
 
  main
             ErrorCode::IllegalTransition,
+            ErrorCode::SessionExpired,
             ErrorCode::CacheExpired,
             ErrorCode::CacheNotFound,
             ErrorCode::IllegalTransition,

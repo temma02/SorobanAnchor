@@ -21,7 +21,11 @@ pub struct Session {
     pub created_at: u64,
     pub nonce: u64,
     pub operation_count: u64,
+ feat/session-expiry-check
+    pub session_ttl_seconds: u64,
+
     pub closed: bool,
+ main
 }
 
 #[contracttype]
@@ -1022,7 +1026,11 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
             created_at: now,
             nonce: 0,
             operation_count: 0,
+ feat/session-expiry-check
+            session_ttl_seconds: 3600,
+
             closed: false,
+ main
         };
         let sess_key = (symbol_short!("SESS"), session_id);
         env.storage().persistent().set(&sess_key, &session);
@@ -1163,7 +1171,20 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
         signature: Bytes,
     ) -> u64 {
         issuer.require_auth();
+ feat/session-expiry-check
+        let sess_key = (symbol_short!("SESS"), session_id);
+        let session: Session = env
+            .storage()
+            .persistent()
+            .get(&sess_key)
+            .unwrap_or_else(|| panic_with_error!(&env, ErrorCode::NotInitialized));
+        let now = env.ledger().timestamp();
+        if now > session.created_at + session.session_ttl_seconds {
+            panic_with_error!(&env, ErrorCode::SessionExpired);
+        }
+
         Self::require_session_open(&env, session_id);
+ main
         Self::check_attestor(&env, &issuer);
         Self::enforce_rate_limit(&env, &issuer);
         Self::check_timestamp(&env, timestamp);
