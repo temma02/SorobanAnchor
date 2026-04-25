@@ -264,6 +264,10 @@ pub struct MetadataCache {
     pub metadata: AnchorMetadata,
     pub cached_at: u64,
     pub ttl_seconds: u64,
+    /// Grace period after `ttl_seconds` during which stale data may be served.
+    pub stale_ttl_seconds: u64,
+    /// Set to `true` when the entry is within the stale window; caller should refresh.
+    pub needs_refresh: bool,
 }
 
 #[contracttype]
@@ -1534,7 +1538,13 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
     pub fn cache_metadata(env: Env, anchor: Address, metadata: AnchorMetadata, ttl_seconds: u64) {
         Self::require_admin(&env);
         let now = env.ledger().timestamp();
-        let entry = MetadataCache { metadata, cached_at: now, ttl_seconds };
+        let entry = MetadataCache {
+            metadata,
+            cached_at: now,
+            ttl_seconds,
+            stale_ttl_seconds: 0,
+            needs_refresh: false,
+        };
         let key = (symbol_short!("METACACHE"), anchor);
         let ledger_ttl = if ttl_seconds as u32 > MIN_TEMP_TTL { ttl_seconds as u32 } else { MIN_TEMP_TTL };
         env.storage().temporary().set(&key, &entry);
@@ -1556,6 +1566,83 @@ pub fn is_attestor(env: Env, attestor: Address) -> bool {
         Self::require_admin(&env);
         let key = (symbol_short!("METACACHE"), anchor);
         env.storage().temporary().remove(&key);
+    }
+
+    /// Store a metadata entry with a stale-while-revalidate grace period.
+    /// After `ttl_seconds` the entry becomes stale; after `ttl_seconds + stale_ttl_seconds`
+    /// it is fully expired and `get_cached_metadata_swr` will return an error.
+    pub fn cache_metadata_swr(
+        env: Env,
+        anchor: Address,
+        metadata: AnchorMetadata,
+        ttl_seconds: u64,
+        stale_ttl_seconds: u64,
+    ) {
+        Self::require_admin(&env);
+        let now = env.ledger().timestamp();
+        let entry = MetadataCache {
+            metadata,
+            cached_at: now,
+            ttl_seconds,
+            stale_ttl_seconds,
+            needs_refresh: false,
+        };
+        let key = (symbol_short!("METACACHE"), anchor);
+        let total_ttl = ttl_seconds.saturating_add(stale_ttl_seconds);
+        let ledger_ttl = if total_ttl as u32 > MIN_TEMP_TTL { total_ttl as u32 } else { MIN_TEMP_TTL };
+        env.storage().temporary().set(&key, &entry);
+        env.storage().temporary().extend_ttl(&key, ledger_ttl, ledger_ttl);
+    }
+
+    /// Retrieve a metadata entry using the stale-while-revalidate policy.
+    ///
+    /// Returns `(metadata, needs_refresh)`:
+    /// - `needs_refresh = false` → entry is fresh (within primary TTL)
+    /// - `needs_refresh = true`  → entry is stale (within grace period); caller should refresh
+    ///
+    /// Panics with `CacheExpired` once both TTLs have elapsed, or `CacheNotFound` if absent.
+    pub fn get_cached_metadata_swr(env: Env, anchor: Address) -> (AnchorMetadata, bool) {
+        let key = (symbol_short!("METACACHE"), anchor.clone());
+        let mut entry: MetadataCache = env.storage().temporary().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ErrorCode::CacheNotFound));
+        let now = env.ledger().timestamp();
+        let age = now.saturating_sub(entry.cached_at);
+
+        if age <= entry.ttl_seconds {
+            // Fresh
+            (entry.metadata, false)
+        } else if age <= entry.ttl_seconds.saturating_add(entry.stale_ttl_seconds) {
+            // Stale — mark needs_refresh and persist the flag
+            entry.needs_refresh = true;
+            env.storage().temporary().set(&key, &entry);
+            (entry.metadata, true)
+        } else {
+            panic_with_error!(&env, ErrorCode::CacheExpired);
+        }
+    }
+
+    /// Unconditionally replace the cached metadata entry, resetting both TTL clocks.
+    pub fn force_refresh_metadata(
+        env: Env,
+        anchor: Address,
+        metadata: AnchorMetadata,
+        ttl_seconds: u64,
+        stale_ttl_seconds: u64,
+    ) {
+        Self::require_admin(&env);
+        let now = env.ledger().timestamp();
+        let entry = MetadataCache {
+            metadata,
+            cached_at: now,
+            ttl_seconds,
+            stale_ttl_seconds,
+            needs_refresh: false,
+        };
+        let key = (symbol_short!("METACACHE"), anchor);
+        let total_ttl = ttl_seconds.saturating_add(stale_ttl_seconds);
+        let ledger_ttl = if total_ttl as u32 > MIN_TEMP_TTL { total_ttl as u32 } else { MIN_TEMP_TTL };
+        env.storage().temporary().set(&key, &entry);
+        env.storage().temporary().extend_ttl(&key, ledger_ttl, ledger_ttl);
     }
 
     // -----------------------------------------------------------------------
