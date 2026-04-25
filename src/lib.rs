@@ -73,6 +73,9 @@ mod sep10_contract_tests;
 mod routing_tests;
 
 #[cfg(test)]
+mod attestation_sig_tests;
+
+#[cfg(test)]
 mod deterministic_hash_snapshot_tests {
     // Snapshot tests live inside deterministic_hash module itself.
     // This module exists to satisfy the test_snapshots/deterministic_hash_tests path.
