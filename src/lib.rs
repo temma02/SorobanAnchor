@@ -24,7 +24,7 @@ pub use response_validator::{
     validate_withdraw_response, AnchorInfoResponse, DepositResponse as ValidatorDepositResponse,
     QuoteResponse, WithdrawResponse,
 };
-pub use retry::{retry_with_backoff, is_retryable, RetryConfig};
+pub use retry::{retry_with_backoff, is_retryable, RetryConfig, JitterSource, LedgerJitterSource, MockJitterSource};
 pub use deterministic_hash::{compute_payload_hash, verify_payload_hash};
 
 #[cfg(test)]
