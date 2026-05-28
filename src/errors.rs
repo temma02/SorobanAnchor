@@ -84,9 +84,21 @@ pub enum ErrorCode {
     SessionClosed             = 26,
     UnsupportedCapabilityVersion = 27,
 
+    // Session / routing errors (27–30)
+    SessionOperationLimitExceeded = 27,
+    InvalidWeights                = 28,
+
     // Cache errors (48–49)
     CacheExpired              = 48,
     CacheNotFound             = 49,
+
+    // Profile / metadata validation errors (50–52)
+    /// Attestor profile not found (no profile record exists yet).
+    AttestorProfileNotFound   = 50,
+    /// RequestContext has an empty operation name or invalid chain.
+    InvalidRequestContext     = 51,
+    /// Session metadata is malformed (empty operation type, zero timestamp, etc.).
+    InvalidSessionMetadata    = 52,
 }
 
 impl ErrorCode {
@@ -133,10 +145,14 @@ impl ErrorCode {
             ErrorCode::NotInitialized            => "Contract is not initialized",
             ErrorCode::IllegalTransition         => "Illegal transaction state transition",
             ErrorCode::SessionExpired            => "Session has expired",
-            ErrorCode::SessionClosed             => "Session is closed",
-            ErrorCode::UnsupportedCapabilityVersion => "Service capability version is unsupported",
+            ErrorCode::SessionClosed                  => "Session is closed",
+            ErrorCode::SessionOperationLimitExceeded   => "Session operation limit exceeded",
+            ErrorCode::InvalidWeights                  => "Routing weights must sum to 1.0",
             ErrorCode::CacheExpired              => "Cache entry has expired",
             ErrorCode::CacheNotFound             => "Cache entry not found",
+            ErrorCode::AttestorProfileNotFound   => "Attestor profile not found",
+            ErrorCode::InvalidRequestContext     => "Request context is invalid",
+            ErrorCode::InvalidSessionMetadata    => "Session metadata is invalid",
         }
     }
 }
@@ -299,8 +315,13 @@ impl AnchorKitError {
     pub fn rate_limit_exceeded() -> Self { Self::from_code(ErrorCode::RateLimitExceeded) }
     pub fn session_expired() -> Self { Self::from_code(ErrorCode::SessionExpired) }
     pub fn session_closed() -> Self { Self::from_code(ErrorCode::SessionClosed) }
+    pub fn session_operation_limit_exceeded() -> Self { Self::from_code(ErrorCode::SessionOperationLimitExceeded) }
+    pub fn invalid_weights() -> Self { Self::from_code(ErrorCode::InvalidWeights) }
     pub fn cache_expired() -> Self { Self::from_code(ErrorCode::CacheExpired) }
     pub fn cache_not_found() -> Self { Self::from_code(ErrorCode::CacheNotFound) }
+    pub fn attestor_profile_not_found() -> Self { Self::from_code(ErrorCode::AttestorProfileNotFound) }
+    pub fn invalid_request_context() -> Self { Self::from_code(ErrorCode::InvalidRequestContext) }
+    pub fn invalid_session_metadata() -> Self { Self::from_code(ErrorCode::InvalidSessionMetadata) }
 
     /// Richer constructor that captures how many attempts were made and the
     /// last transport/HTTP error string.
@@ -431,9 +452,13 @@ mod tests {
             ErrorCode::IllegalTransition,
             ErrorCode::SessionExpired,
             ErrorCode::SessionClosed,
-            ErrorCode::UnsupportedCapabilityVersion,
+            ErrorCode::SessionOperationLimitExceeded,
+            ErrorCode::InvalidWeights,
             ErrorCode::CacheExpired,
             ErrorCode::CacheNotFound,
+            ErrorCode::AttestorProfileNotFound,
+            ErrorCode::InvalidRequestContext,
+            ErrorCode::InvalidSessionMetadata,
         ];
         for code in codes {
             assert!(!code.default_message().is_empty());
@@ -453,6 +478,9 @@ mod tests {
         assert_eq!(ErrorCode::UnsupportedCapabilityVersion as u32, 27);
         assert_eq!(ErrorCode::CacheExpired          as u32, 48);
         assert_eq!(ErrorCode::CacheNotFound         as u32, 49);
+        assert_eq!(ErrorCode::AttestorProfileNotFound as u32, 50);
+        assert_eq!(ErrorCode::InvalidRequestContext as u32, 51);
+        assert_eq!(ErrorCode::InvalidSessionMetadata as u32, 52);
     }
 
     #[test]
