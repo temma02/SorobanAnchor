@@ -211,6 +211,7 @@ mod tests {
                 backoff_multiplier: 1,
                 max_delay_ms: 10,
             },
+
             dead_letter_storage_key: "test-key".to_string(),
         }
     }
