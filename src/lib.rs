@@ -165,6 +165,7 @@ pub use deterministic_hash::{compute_payload_hash, verify_payload_hash};
 pub use contract::{AnchorKitContract, EndpointUpdated, CacheConfig};
 pub use transaction_state_tracker::{TransactionState, TransactionStateRecord, RecoveryMetadata, OptRecovery};
 pub use transaction_state_tracker::{StorageBudgetMonitor, TransactionStateTracker};
+pub use transaction_state_tracker::TransactionSummary;
 
 // ── std-only re-exports ───────────────────────────────────────────────────────
 #[cfg(feature = "std")]
@@ -203,6 +204,7 @@ pub use transaction_state_tracker::{TransactionState, TransactionStateRecord, Re
 pub use transaction_state_tracker::{
     StorageBudgetMonitor, TransactionStateTracker, BudgetStatus, BudgetAlert,
 };
+pub use transaction_state_tracker::TransactionSummary;
 pub mod streaming_monitor;
 pub use streaming_monitor::{StreamingTransactionMonitor, TransactionStatusUpdate};
 

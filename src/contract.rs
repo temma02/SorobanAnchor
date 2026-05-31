@@ -683,6 +683,38 @@ pub struct ContractDiagnostics {
 /// stored data to detect version skew.
 pub const SCHEMA_V1: u32 = 1;
 
+/// Aggregated transaction counts returned by
+/// [`AnchorKitContract::summarize_transactions_by_status`].
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransactionStatusSummary {
+    pub pending_count: u64,
+    pub in_progress_count: u64,
+    pub completed_count: u64,
+    pub failed_count: u64,
+    pub total_count: u64,
+}
+
+/// A single versioned snapshot of anchor metadata, stored in the history log.
+///
+/// Written by [`AnchorKitContract::set_anchor_metadata`] each time the metadata
+/// changes. The `version` field is a monotonically increasing counter scoped to
+/// the anchor; `updated_at` is the ledger timestamp of the write.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnchorMetadataVersion {
+    /// Monotonically increasing version number (1-based).
+    pub version: u32,
+    /// Ledger timestamp when this version was written.
+    pub updated_at: u64,
+    pub reputation_score: u32,
+    pub average_settlement_time: u64,
+    pub liquidity_score: u32,
+    pub uptime_percentage: u32,
+    pub total_volume: u64,
+    pub is_active: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Event structs
 // ---------------------------------------------------------------------------
@@ -3595,6 +3627,34 @@ impl AnchorKitContract {
         env.storage().persistent().set(&meta_key, &meta);
         env.storage().persistent().extend_ttl(&meta_key, PERSISTENT_TTL, PERSISTENT_TTL);
 
+        // ── Version history ──────────────────────────────────────────────────
+        // Increment the per-anchor version counter and append a history entry.
+        let xdr = anchor.clone().to_xdr(&env);
+        let raw = xdr_to_vec(&xdr);
+        let vcnt_key = make_storage_key(&env, &[b"METAVCNT", &raw]);
+        let version: u32 = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&vcnt_key)
+            .unwrap_or(0)
+            + 1;
+        env.storage().persistent().set(&vcnt_key, &version);
+        env.storage().persistent().extend_ttl(&vcnt_key, PERSISTENT_TTL, PERSISTENT_TTL);
+
+        let history_entry = AnchorMetadataVersion {
+            version,
+            updated_at: env.ledger().timestamp(),
+            reputation_score,
+            average_settlement_time,
+            liquidity_score,
+            uptime_percentage,
+            total_volume,
+            is_active: true,
+        };
+        let hkey = make_storage_key(&env, &[b"METAHIST", &raw, &version.to_be_bytes()]);
+        env.storage().persistent().set(&hkey, &history_entry);
+        env.storage().persistent().extend_ttl(&hkey, PERSISTENT_TTL, PERSISTENT_TTL);
+
         // Maintain ANCHLIST — stored under a deterministic key (#229)
         let list_key = make_storage_key(&env, &[b"ANCHLIST"]);
         let mut list: Vec<Address> = env.storage().persistent()
@@ -3605,6 +3665,85 @@ impl AnchorKitContract {
             env.storage().persistent().set(&list_key, &list);
             env.storage().persistent().extend_ttl(&list_key, PERSISTENT_TTL, PERSISTENT_TTL);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Anchor metadata version history
+    // -----------------------------------------------------------------------
+
+    /// Return the current version number for an anchor's metadata history.
+    ///
+    /// Returns `0` when no metadata has ever been set for the anchor.
+    pub fn get_anchor_metadata_version_count(env: Env, anchor: Address) -> u32 {
+        let xdr = anchor.clone().to_xdr(&env);
+        let raw = xdr_to_vec(&xdr);
+        let vcnt_key = make_storage_key(&env, &[b"METAVCNT", &raw]);
+        env.storage()
+            .persistent()
+            .get::<_, u32>(&vcnt_key)
+            .unwrap_or(0)
+    }
+
+    /// Retrieve a specific historical version of an anchor's metadata.
+    ///
+    /// Versions are 1-based and increase monotonically with each call to
+    /// [`set_anchor_metadata`](Self::set_anchor_metadata).
+    ///
+    /// # Errors
+    ///
+    /// Panics with [`ErrorCode::AttestorNotRegistered`] when the requested
+    /// version does not exist (never written or TTL expired).
+    pub fn get_anchor_metadata_at_version(
+        env: Env,
+        anchor: Address,
+        version: u32,
+    ) -> AnchorMetadataVersion {
+        let xdr = anchor.clone().to_xdr(&env);
+        let raw = xdr_to_vec(&xdr);
+        let hkey = make_storage_key(&env, &[b"METAHIST", &raw, &version.to_be_bytes()]);
+        env.storage()
+            .persistent()
+            .get::<_, AnchorMetadataVersion>(&hkey)
+            .unwrap_or_else(|| panic_with_error!(&env, ErrorCode::AttestorNotRegistered))
+    }
+
+    /// Return the full ordered metadata history for an anchor, from version 1
+    /// to the current version, capped at 50 entries to prevent unbounded reads.
+    ///
+    /// Entries are returned in ascending version order (oldest first).
+    /// Versions whose storage entries have expired are silently omitted.
+    ///
+    /// # Returns
+    ///
+    /// A [`Vec`] of [`AnchorMetadataVersion`] records, oldest first.
+    pub fn get_anchor_metadata_history(
+        env: Env,
+        anchor: Address,
+    ) -> Vec<AnchorMetadataVersion> {
+        const MAX_HISTORY: u32 = 50;
+        let xdr = anchor.clone().to_xdr(&env);
+        let raw = xdr_to_vec(&xdr);
+        let vcnt_key = make_storage_key(&env, &[b"METAVCNT", &raw]);
+        let total: u32 = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&vcnt_key)
+            .unwrap_or(0);
+
+        let mut history = Vec::new(&env);
+        // Start from the oldest version that fits within the cap.
+        let start = if total > MAX_HISTORY { total - MAX_HISTORY + 1 } else { 1 };
+        for v in start..=total {
+            let hkey = make_storage_key(&env, &[b"METAHIST", &raw, &v.to_be_bytes()]);
+            if let Some(entry) = env
+                .storage()
+                .persistent()
+                .get::<_, AnchorMetadataVersion>(&hkey)
+            {
+                history.push_back(entry);
+            }
+        }
+        history
     }
 
     /// Reactivate a previously deactivated anchor (admin-only). Sets `is_active = true`.
@@ -4068,7 +4207,7 @@ impl AnchorKitContract {
             initiator,
             timestamp: now,
             last_updated: now,
-            last_updated_ledger: env.ledger().sequence(),
+            last_updated_ledger: current_ledger,
             error_message: None,
             state_history: history,
             recovery_metadata: OptRecovery::None,
@@ -4076,6 +4215,78 @@ impl AnchorKitContract {
         let key = (symbol_short!("TXSTATE"), transaction_id);
         env.storage().persistent().set(&key, &record);
         env.storage().persistent().extend_ttl(&key, PERSISTENT_TTL, PERSISTENT_TTL);
+        // Track in TXIDS list for summarize_transactions_by_status
+        let ids_key = symbol_short!("TXIDS");
+        let mut ids: soroban_sdk::Vec<u64> = env
+            .storage().persistent().get(&ids_key)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(&env));
+        ids.push_back(transaction_id);
+        env.storage().persistent().set(&ids_key, &ids);
+        env.storage().persistent().extend_ttl(&ids_key, PERSISTENT_TTL, PERSISTENT_TTL);
+        record
+    }
+
+    /// Advance a transaction from Pending to InProgress.
+    pub fn start_transaction_record(env: Env, transaction_id: u64) -> TransactionStateRecord {
+        Self::advance_transaction_state_internal(&env, transaction_id, TransactionState::InProgress, None)
+    }
+
+    /// Advance a transaction from InProgress to Completed.
+    pub fn complete_transaction_record(env: Env, transaction_id: u64) -> TransactionStateRecord {
+        Self::advance_transaction_state_internal(&env, transaction_id, TransactionState::Completed, None)
+    }
+
+    /// Advance a transaction to Failed with an error message.
+    pub fn fail_transaction_record(env: Env, transaction_id: u64, error_message: String) -> TransactionStateRecord {
+        Self::advance_transaction_state_internal(&env, transaction_id, TransactionState::Failed, Some(error_message))
+    }
+
+    fn advance_transaction_state_internal(
+        env: &Env,
+        transaction_id: u64,
+        new_state: TransactionState,
+        error_message: Option<String>,
+    ) -> TransactionStateRecord {
+        let key = (symbol_short!("TXSTATE"), transaction_id);
+        let mut record: TransactionStateRecord = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, ErrorCode::AttestationNotFound));
+
+        let from_state = record.state;
+        if !from_state.is_valid_transition(new_state) {
+            panic_with_error!(env, ErrorCode::IllegalTransition);
+        }
+
+        let now = env.ledger().timestamp();
+        let current_ledger = env.ledger().sequence();
+        record.state = new_state;
+        record.last_updated = now;
+        record.last_updated_ledger = current_ledger;
+        record.error_message = error_message.clone();
+        record.state_history.push_back((new_state, now));
+
+        if new_state == TransactionState::Failed {
+            let reason = error_message
+                .unwrap_or_else(|| String::from_str(env, "unspecified failure"));
+            record.recovery_metadata = OptRecovery::Some(
+                crate::transaction_state_tracker::RecoveryMetadata {
+                    failure_reason: reason,
+                    last_updated_ledger: current_ledger,
+                    failed_from_state: from_state,
+                    retry_count: 0,
+                },
+            );
+        }
+
+        let ttl = if new_state.is_terminal() {
+            518_400u32 // ~30 days terminal TTL (matches TXSTATE_TTL_TERMINAL)
+        } else {
+            PERSISTENT_TTL
+        };
+        env.storage().persistent().set(&key, &record);
+        env.storage().persistent().extend_ttl(&key, ttl, ttl);
         record
     }
 
@@ -4501,6 +4712,108 @@ impl AnchorKitContract {
                 .unwrap_or(false)
         } else {
             false
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Batch transaction queries and summaries
+    // -----------------------------------------------------------------------
+
+    /// Return up to `limit` transaction records whose IDs fall in the inclusive
+    /// range `[from_id, to_id]`, ordered by ID ascending.
+    ///
+    /// The batch size is capped at 100 to prevent unbounded on-chain iteration.
+    /// This method reads directly from persistent storage and skips IDs that
+    /// have expired (TTL elapsed).
+    ///
+    /// # Arguments
+    ///
+    /// * `from_id` - Inclusive lower bound of the transaction ID range.
+    /// * `to_id`   - Inclusive upper bound of the transaction ID range.
+    /// * `limit`   - Maximum records to return (capped at 100).
+    ///
+    /// # Returns
+    ///
+    /// A [`Vec`] of [`TransactionStateRecord`]s sorted by ID ascending.
+    pub fn get_transactions_in_range(
+        env: Env,
+        from_id: u64,
+        to_id: u64,
+        limit: u32,
+    ) -> Vec<TransactionStateRecord> {
+        const MAX_BATCH: u32 = 100;
+        let effective_limit = limit.min(MAX_BATCH);
+        let mut results = Vec::new(&env);
+
+        if from_id > to_id {
+            return results;
+        }
+
+        let mut id = from_id;
+        let mut count = 0u32;
+        while id <= to_id && count < effective_limit {
+            let key = (symbol_short!("TXSTATE"), id);
+            if let Some(record) = env
+                .storage()
+                .persistent()
+                .get::<_, TransactionStateRecord>(&key)
+            {
+                results.push_back(record);
+                count += 1;
+            }
+            id += 1;
+        }
+        results
+    }
+
+    /// Return aggregated transaction counts grouped by current state.
+    ///
+    /// Reads the known-IDs list from persistent storage and counts each live
+    /// record by its current [`TransactionState`]. Records whose TTL has
+    /// elapsed are silently excluded from the totals.
+    ///
+    /// # Returns
+    ///
+    /// A [`TransactionStatusSummary`] with per-state counts and a `total_count`.
+    pub fn summarize_transactions_by_status(env: Env) -> TransactionStatusSummary {
+        use crate::transaction_state_tracker::TransactionState as TxState;
+
+        let ids_key = symbol_short!("TXIDS");
+        let ids: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&ids_key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut pending_count: u64 = 0;
+        let mut in_progress_count: u64 = 0;
+        let mut completed_count: u64 = 0;
+        let mut failed_count: u64 = 0;
+        let mut total_count: u64 = 0;
+
+        for id in ids.iter() {
+            let key = (symbol_short!("TXSTATE"), id);
+            if let Some(record) = env
+                .storage()
+                .persistent()
+                .get::<_, TransactionStateRecord>(&key)
+            {
+                match record.state {
+                    TxState::Pending    => pending_count += 1,
+                    TxState::InProgress => in_progress_count += 1,
+                    TxState::Completed  => completed_count += 1,
+                    TxState::Failed     => failed_count += 1,
+                }
+                total_count += 1;
+            }
+        }
+
+        TransactionStatusSummary {
+            pending_count,
+            in_progress_count,
+            completed_count,
+            failed_count,
+            total_count,
         }
     }
 
