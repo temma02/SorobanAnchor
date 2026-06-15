@@ -1,10 +1,38 @@
+# Rust
 /target
-Cargo.lock
-.DS_Store
-.env
 **/*.rs.bk
 
 # Release artifacts
 /dist
 *.tar.gz
 *.sha256
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# macOS
+.DS_Store
+
+# Node / UI
+ui/node_modules/
+ui/dist/
+ui/build/
+ui/coverage/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Editor
+.vscode/
+.idea/
+
+# Cargo.lock — keep for binaries, remove for libraries
+# (this is a library crate, so omit Cargo.lock from VCS)
+Cargo.lock
